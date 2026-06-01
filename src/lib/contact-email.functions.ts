@@ -1,10 +1,5 @@
-import * as React from 'react'
-import { render } from '@react-email/components'
-import { createClient } from '@supabase/supabase-js'
 import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
-
-import { TEMPLATES } from '@/lib/email-templates/registry'
 
 const ContactEmailSchema = z.object({
   name: z.string().trim().min(1).max(120),
@@ -14,67 +9,38 @@ const ContactEmailSchema = z.object({
   message: z.string().trim().max(2000).optional().default(''),
 })
 
-const SITE_NAME = 'invest-doggy'
-const SENDER_DOMAIN = 'notify.www.doggyinvest.com'
-const FROM_DOMAIN = 'www.doggyinvest.com'
-
+/**
+ * Simplified Contact Function
+ * This sends the form data to Formspree, which handles the email delivery
+ * to investdoggy@atomicmail.io without needing a complex database queue.
+ */
 export const sendContactFunderEmail = createServerFn({ method: 'POST' })
   .inputValidator((input) => ContactEmailSchema.parse(input))
   .handler(async ({ data }) => {
-    const supabaseUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-
-    if (!supabaseUrl || !supabaseServiceKey) {
-      throw new Error('Email is not configured yet')
-    }
-
-    const template = TEMPLATES['contact-funder']
-    if (!template?.to) {
-      throw new Error('Contact email template is not configured')
-    }
-
-    const element = React.createElement(template.component, data)
-    const html = await render(element)
-    const text = await render(element, { plainText: true })
-    const subject = typeof template.subject === 'function' ? template.subject(data) : template.subject
-    const messageId = crypto.randomUUID()
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
-
-    await supabase.from('email_send_log').insert({
-      message_id: messageId,
-      template_name: 'contact-funder',
-      recipient_email: template.to,
-      status: 'pending',
-      metadata: { reply_to: data.email },
-    })
-
-    const { error } = await supabase.rpc('enqueue_email', {
-      queue_name: 'transactional_emails',
-      payload: {
-        message_id: messageId,
-        to: template.to,
-        from: `${SITE_NAME} <noreply@${FROM_DOMAIN}>`,
-        sender_domain: SENDER_DOMAIN,
-        subject,
-        html,
-        text,
-        purpose: 'transactional',
-        label: 'contact-funder',
-        idempotency_key: messageId,
-        queued_at: new Date().toISOString(),
-      },
-    })
-
-    if (error) {
-      await supabase.from('email_send_log').insert({
-        message_id: messageId,
-        template_name: 'contact-funder',
-        recipient_email: template.to,
-        status: 'failed',
-        error_message: 'Failed to enqueue contact email',
+    // Replace this ID with your actual Formspree form ID
+    // You can get one for free at https://formspree.io
+    const FORMSPREE_ID = 'xzzzkpzo' 
+    
+    try {
+      const response = await fetch(`https://formspree.io/f/${FORMSPREE_ID}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+          subject: `New Contact Request from ${data.name}`,
+          ...data
+        })
       })
+
+      if (!response.ok) {
+        throw new Error('Failed to send to Formspree')
+      }
+
+      return { success: true }
+    } catch (error) {
+      console.error('Email send error:', error)
       throw new Error('Could not send email yet')
     }
-
-    return { success: true }
   })
